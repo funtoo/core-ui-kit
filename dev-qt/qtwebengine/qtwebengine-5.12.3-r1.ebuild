@@ -1,7 +1,7 @@
 # Copyright 1999-2019 Gentoo Authors
 # Distributed under the terms of the GNU General Public License v2
 
-EAPI=6
+EAPI=7
 PYTHON_COMPAT=( python2_7 )
 inherit multiprocessing pax-utils python-any-r1 qt5-build
 
@@ -11,7 +11,7 @@ if [[ ${QT5_BUILD_TYPE} == release ]]; then
 	KEYWORDS="amd64 arm arm64 x86"
 fi
 
-IUSE="alsa bindist designer geolocation jumbo-build pax_kernel pulseaudio
+IUSE="alsa bindist designer jumbo-build pax_kernel pulseaudio spellcheck
 	+system-ffmpeg +system-icu widgets"
 REQUIRED_USE="designer? ( widgets )"
 
@@ -24,6 +24,7 @@ RDEPEND="
 	~dev-qt/qtdeclarative-${PV}
 	~dev-qt/qtgui-${PV}
 	~dev-qt/qtnetwork-${PV}
+	~dev-qt/qtpositioning-${PV}
 	~dev-qt/qtprintsupport-${PV}
 	~dev-qt/qtwebchannel-${PV}[qml]
 	dev-libs/expat
@@ -39,7 +40,7 @@ RDEPEND="
 	media-libs/libpng:0=
 	>=media-libs/libvpx-1.5:=[svc]
 	media-libs/libwebp:=
-	media-libs/mesa[egl]
+	media-libs/mesa[egl,X(+)]
 	media-libs/opus
 	sys-apps/dbus
 	sys-apps/pciutils
@@ -59,8 +60,8 @@ RDEPEND="
 	x11-libs/libXtst
 	alsa? ( media-libs/alsa-lib )
 	designer? ( ~dev-qt/designer-${PV} )
-	geolocation? ( ~dev-qt/qtpositioning-${PV} )
 	pulseaudio? ( media-sound/pulseaudio:= )
+    spellcheck? ( app-text/hunspell:= )
 	system-ffmpeg? ( media-video/ffmpeg:0= )
 	system-icu? ( >=dev-libs/icu-60.2:= )
 	widgets? (
@@ -76,20 +77,22 @@ DEPEND="${RDEPEND}
 	dev-util/re2c
 	sys-devel/bison
 	pax_kernel? ( sys-apps/elfix )
-	!!=sys-devel/binutils-2.31.1-r5
-	!!=sys-devel/binutils-2.32-r0
 "
 
 PATCHES+=(
 	"${FILESDIR}/${PN}-5.12.0-nouveau-disable-gpu.patch" # bug 609752
+	"${FILESDIR}/${PN}-SIOCGSTAMP.patch"
+	# QTBUG 77402
+	"${FILESDIR}/${P}-skcms-fix.patch"
+	# QTBUB 77914
+	"${FILESDIR}/${P}-chromium-non-void-return.patch"
 )
 
 src_prepare() {
 	use pax_kernel && PATCHES+=( "${FILESDIR}/${PN}-5.11.2-paxmark-mksnapshot.patch" )
 
 	if ! use jumbo-build; then
-		sed -i -e 's|use_jumbo_build=true|use_jumbo_build=false|' \
-			src/core/config/common.pri || die
+		sed -i -e 's|use_jumbo_build=true|use_jumbo_build=false|' src/core/config/common.pri || die
 	fi
 
 	# bug 620444 - ensure local headers are used
@@ -97,16 +100,9 @@ src_prepare() {
 
 	qt_use_disable_config alsa webengine-alsa src/core/config/linux.pri
 	qt_use_disable_config pulseaudio webengine-pulseaudio src/core/config/linux.pri
-
 	qt_use_disable_mod designer webenginewidgets src/plugins/plugins.pro
 
-	qt_use_disable_mod geolocation positioning \
-		mkspecs/features/configure.prf \
-		src/core/core_chromium.pri \
-		src/core/core_common.pri
-
 	qt_use_disable_mod widgets widgets src/src.pro
-
 	qt5-build_src_prepare
 }
 
@@ -114,16 +110,30 @@ src_configure() {
 	export NINJA_PATH=/usr/bin/ninja
 	export NINJAFLAGS="${NINJAFLAGS:--j$(makeopts_jobs) -l$(makeopts_loadavg "${MAKEOPTS}" 0) -v}"
 
+#	local myqmakeargs=(
+#        --
+#        -webengine-opus
+#        -webengine-printing-and-pdf
+#        -webengine-webp
+#		$(usex alsa '-webengine-alsa' '')
+#		$(usex pulseaudio '-webengine-pulseaudio' '')
+#		$(usex system-icu '-webengine-icu' '')
+#		$(usex system-ffmpeg '-webengine-ffmpeg' '')
+#		$(usex bindist '' '-webengine-proprietary-codecs')
+#		$(usex spellcheck '-webengine-spellchecker' '')
+#	)
+
 	local myqmakeargs=(
-		--
-		-opus
-		-printing-and-pdf
-		-webp
+        --
+        -opus
+        -printing-and-pdf
+        -webp
 		$(usex alsa '-alsa' '')
-		$(usex bindist '' '-proprietary-codecs')
 		$(usex pulseaudio '-pulseaudio' '')
-		$(usex system-ffmpeg '-ffmpeg' '')
 		$(usex system-icu '-webengine-icu' '')
+		$(usex system-ffmpeg '-ffmpeg' '')
+		$(usex bindist '' '-proprietary-codecs')
+		$(usex spellcheck '-spellchecker' '')
 	)
 	qt5-build_src_configure
 }
@@ -132,9 +142,9 @@ src_install() {
 	qt5-build_src_install
 
 	# bug 601472
-	if [[ ! -f ${D%/}${QT5_LIBDIR}/libQt5WebEngine.so ]]; then
+	if [[ ! -f ${D}${QT5_LIBDIR}/libQt5WebEngine.so ]]; then
 		die "${CATEGORY}/${PF} failed to build anything. Please report to https://bugs.gentoo.org/"
 	fi
 
-	pax-mark m "${D%/}${QT5_LIBEXECDIR}"/QtWebEngineProcess
+	pax-mark m "${D}${QT5_LIBEXECDIR}"/QtWebEngineProcess
 }
